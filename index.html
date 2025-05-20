@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Our Solar System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* Apply Inter font and set body to take full viewport height */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars as the canvas will fill the screen */
+            height: 100vh; /* Ensure body takes full viewport height */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000; /* Black background for space */
+            cursor: default; /* Default cursor for general area */
+        }
+        /* Style the canvas to fill its container and be responsive */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* Message box styling */
+        .message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9); /* Slightly darker for better contrast */
+            color: white;
+            padding: 20px;
+            border-radius: 12px; /* More rounded corners */
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4); /* Stronger shadow */
+            z-index: 1000;
+            text-align: center;
+            display: none; /* Hidden by default */
+            max-width: 90%; /* Increased max-width for mobile */
+            min-width: 280px; /* Min width for readability */
+            box-sizing: border-box; /* Include padding in width calculation */
+            font-size: 0.9rem; /* Slightly smaller font for mobile */
+            display: flex; /* Use flexbox for content alignment */
+            flex-direction: column; /* Stack content vertically */
+            align-items: center; /* Center items horizontally */
+        }
+        @media (min-width: 640px) { /* Adjust for larger screens (e.g., tablets/desktops) */
+            .message-box {
+                max-width: 500px;
+                font-size: 1rem;
+            }
+        }
+        .message-box p {
+            margin-bottom: 15px; /* Space below text content */
+        }
+        .message-box .button-container {
+            display: flex;
+            flex-direction: column; /* Stack buttons vertically on mobile */
+            gap: 10px; /* Space between buttons */
+            width: 100%; /* Ensure container takes full width */
+            align-items: center; /* Center buttons */
+        }
+        @media (min-width: 640px) {
+            .message-box .button-container {
+                flex-direction: row; /* Buttons side-by-side on larger screens */
+                justify-content: center; /* Center buttons horizontally */
+            }
+        }
+        .message-box button {
+            background-color: #3b82f6; /* Blue-500 */
+            color: white;
+            padding: 10px 20px; /* Larger padding for touch targets */
+            border: none;
+            border-radius: 6px; /* More rounded button */
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s ease; /* Smooth transition for hover */
+            width: 100%; /* Full width button on mobile */
+            max-width: 200px; /* Limit button width on larger screens */
+        }
+        .message-box button:hover {
+            background-color: #2563eb; /* Darker blue on hover */
+        }
+        /* Loading spinner for LLM calls */
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 10px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Button styles */
+        .action-button {
+            position: absolute;
+            background-color: #10b981; /* Emerald-500 */
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            z-index: 900; /* Below message box but above canvas */
+            width: calc(100% - 40px); /* Full width minus padding on mobile */
+            max-width: 300px; /* Max width for larger screens */
+        }
+        .action-button:hover {
+            transform: scale(1.05); /* Slight scale effect */
+        }
+        .cosmic-event-button {
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #10b981; /* Emerald-500 */
+        }
+        .cosmic-event-button:hover {
+            background-color: #059669; /* Darker emerald on hover */
+        }
+        .trivia-button {
+            top: 20px; /* Position at the top */
+            right: 20px;
+            transform: translateX(0); /* No horizontal translation needed for right alignment */
+            background-color: #ef4444; /* Red-500 */
+        }
+        .trivia-button:hover {
+            background-color: #dc2626; /* Darker red on hover */
+            transform: scale(1.05);
+        }
+
+        /* Responsive positioning for buttons */
+        @media (max-width: 639px) {
+            .trivia-button {
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                max-width: calc(100% - 40px);
+            }
+        }
+    </style>
+</head>
+<body class="bg-black text-white">
+    <canvas id="spaceCanvas"></canvas>
+
+    <button id="generateCosmicEventButton" class="action-button cosmic-event-button">
+        Generate Cosmic Event ✨
+    </button>
+
+    <button id="generateSpaceTriviaButton" class="action-button trivia-button">
+        Space Trivia ✨
+    </button>
+
+    <div id="messageBox" class="message-box">
+        <p id="messageText"></p>
+        <div id="loadingSpinner" class="spinner" style="display: none;"></div>
+        <div id="messageBoxButtons" class="button-container"></div>
+    </div>
+
+    <script>
+        // Global variables for Three.js scene components
+        let scene, camera, renderer;
+        let stars = []; // Array to hold star particles
+        let planets = []; // Array to hold multiple planet objects
+        let sun; // Variable for the Sun mesh
+        let mouseX = 0, mouseY = 0; // Mouse coordinates for camera control
+        let targetX = 0, targetY = 0; // Target camera rotation based on mouse
+        const windowHalfX = window.innerWidth / 2; // Half width of the window
+        const windowHalfY = window.innerHeight / 2; // Half height of the window
+
+        // Variables for Raycasting (to detect clicks on the planet)
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        /**
+         * Displays a custom message box instead of using `alert()`.
+         * @param {string} message - The message to display.
+         * @param {boolean} showSpinner - Whether to show the loading spinner.
+         * @param {Array<Object>} [buttons=[]] - An array of button configurations {text: string, onClick: function}.
+         */
+        function showMessageBox(message, showSpinner = false, buttons = []) {
+            const messageBox = document.getElementById('messageBox');
+            const messageText = document.getElementById('messageText');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const messageBoxButtons = document.getElementById('messageBoxButtons');
+
+            messageText.textContent = message;
+            messageBoxButtons.innerHTML = ''; // Clear previous buttons
+
+            if (showSpinner) {
+                loadingSpinner.style.display = 'block';
+            } else {
+                loadingSpinner.style.display = 'none';
+                // Add provided buttons
+                if (buttons.length > 0) {
+                    buttons.forEach(btnConfig => {
+                        const button = document.createElement('button');
+                        button.textContent = btnConfig.text;
+                        // Apply Tailwind classes for styling
+                        button.className = 'bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md';
+                        button.onclick = () => {
+                            // Only hide message box if the button's onClick doesn't explicitly handle it
+                            if (btnConfig.hideOnClose !== false) {
+                                messageBox.style.display = 'none';
+                            }
+                            btnConfig.onClick();
+                        };
+                        messageBoxButtons.appendChild(button);
+                    });
+                } else {
+                    // Default OK button if no specific buttons are provided
+                    const okButton = document.createElement('button');
+                    okButton.textContent = 'OK';
+                    okButton.className = 'bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md';
+                    okButton.onclick = () => messageBox.style.display = 'none';
+                    messageBoxButtons.appendChild(okButton);
+                }
+            }
+            messageBox.style.display = 'flex'; // Use flex to center content
+        }
+
+        /**
+         * Initializes the Three.js scene, camera, and renderer.
+         * Sets up the space environment with stars and multiple planets.
+         */
+        function init() {
+            // 1. Scene: The container for all 3D objects, lights, and cameras.
+            scene = new THREE.Scene();
+            // Set a black background for the space scene
+            scene.background = new THREE.Color(0x000000);
+
+            // 2. Camera: Defines what is visible in the scene and how it's viewed.
+            // PerspectiveCamera(fov, aspect, near, far)
+            // fov: Field of View (vertical extent of the camera's view)
+            // aspect: Aspect ratio (width / height)
+            // near: Near clipping plane (objects closer than this won't be rendered)
+            // far: Far clipping plane (objects farther than this won't be rendered)
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 35; // Move the camera back to see the entire solar system
+
+            // 3. Renderer: Renders the scene using WebGL.
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('spaceCanvas'), antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight); // Set renderer size to full window
+            renderer.setPixelRatio(window.devicePixelRatio); // Handle high DPI screens
+
+            // Add event listeners for window resizing and mouse/touch movement
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('mousemove', onDocumentMouseMove, false);
+            document.addEventListener('touchstart', onDocumentTouchStart, false);
+            document.addEventListener('touchmove', onDocumentTouchMove, false);
+            // Add click listener for raycasting on the canvas
+            renderer.domElement.addEventListener('click', onCanvasClick, false);
+            // Add click listener for the new cosmic event button
+            document.getElementById('generateCosmicEventButton').addEventListener('click', generateCosmicEventDescription);
+            // Add click listener for the new space trivia button
+            document.getElementById('generateSpaceTriviaButton').addEventListener('click', generateSpaceTrivia);
+
+
+            // Create stars
+            createStars();
+
+            // Create the Sun and planets
+            createSolarSystem();
+
+            // Add a subtle ambient light to illuminate the scene
+            const ambientLight = new THREE.AmbientLight(0x404040); // Soft white light
+            scene.add(ambientLight);
+
+            // Add a directional light to simulate a distant star
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); // White light, medium intensity
+            directionalLight.position.set(1, 1, 1).normalize(); // Position the light
+            scene.add(directionalLight);
+        }
+
+        /**
+         * Creates a field of randomly positioned stars.
+         */
+        function createStars() {
+            const starGeometry = new THREE.SphereGeometry(0.05, 24, 24); // Small sphere for each star
+            const starMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff }); // White color
+
+            for (let i = 0; i < 2000; i++) { // Increased number of stars for more density
+                const star = new THREE.Mesh(starGeometry, starMaterial);
+
+                // Randomly position stars within a larger cube
+                star.position.x = (Math.random() - 0.5) * 400;
+                star.position.y = (Math.random() - 0.5) * 400;
+                star.position.z = (Math.random() - 0.5) * 400;
+
+                // Add stars to the scene and the stars array
+                scene.add(star);
+                stars.push(star);
+            }
+        }
+
+        /**
+         * Creates the Sun and the eight planets of our solar system with relative sizes and orbital parameters.
+         */
+        function createSolarSystem() {
+            // Define solar system data (relative to Earth for scale)
+            // Scale factor: Earth's radius = 0.5 units, Earth's orbital radius = 5 units
+            const scale = 0.5; // Base radius scale for Earth
+            const orbitalScale = 5; // Base orbital radius scale for Earth
+
+            const solarSystemData = [
+                { name: "Sun", radius: 109 * scale, color: 0xffff00, orbitalRadius: 0, orbitalPeriod: 0, rotationSpeed: 0.0005, isLight: true },
+                { name: "Mercury", radius: 0.38 * scale, color: 0x8b4513, orbitalRadius: 0.39 * orbitalScale, orbitalPeriod: 0.008, rotationSpeed: 0.01 },
+                { name: "Venus", radius: 0.95 * scale, color: 0xffa500, orbitalRadius: 0.72 * orbitalScale, orbitalPeriod: 0.003, rotationSpeed: 0.008 },
+                { name: "Earth", radius: 1 * scale, color: 0x0000ff, orbitalRadius: 1 * orbitalScale, orbitalPeriod: 0.002, rotationSpeed: 0.015 },
+                { name: "Mars", radius: 0.53 * scale, color: 0xff4500, orbitalRadius: 1.52 * orbitalScale, orbitalPeriod: 0.0015, rotationSpeed: 0.016 },
+                { name: "Jupiter", radius: 11.2 * scale, color: 0xc18d59, orbitalRadius: 5.2 * orbitalScale, orbitalPeriod: 0.0003, rotationSpeed: 0.02 },
+                { name: "Saturn", radius: 9.45 * scale, color: 0xd2b48c, orbitalRadius: 9.5 * orbitalScale, orbitalPeriod: 0.0001, rotationSpeed: 0.018, hasRings: true },
+                { name: "Uranus", radius: 4.01 * scale, color: 0x87ceeb, orbitalRadius: 19.8 * orbitalScale, orbitalPeriod: 0.00007, rotationSpeed: 0.012 },
+                { name: "Neptune", radius: 3.88 * scale, color: 0x4169e1, orbitalRadius: 30 * orbitalScale, orbitalPeriod: 0.00005, rotationSpeed: 0.011 }
+            ];
+
+            // Create the Sun
+            const sunGeometry = new THREE.SphereGeometry(solarSystemData[0].radius, 64, 64);
+            // Use MeshBasicMaterial for the Sun as it will emit light (simulated with PointLight)
+            const sunMaterial = new THREE.MeshBasicMaterial({ color: solarSystemData[0].color });
+            sun = new THREE.Mesh(sunGeometry, sunMaterial);
+            sun.name = solarSystemData[0].name;
+            scene.add(sun);
+
+            // Add a point light from the Sun's position to illuminate the planets
+            const sunLight = new THREE.PointLight(0xffffff, 2, 0, 2); // White light, intensity 2, no decay, no distance limit
+            sunLight.position.set(0, 0, 0); // Position at the center (Sun's position)
+            scene.add(sunLight);
+
+            // Create planets
+            for (let i = 1; i < solarSystemData.length; i++) { // Start from index 1 to skip the Sun
+                const data = solarSystemData[i];
+                const planetGeometry = new THREE.SphereGeometry(data.radius, 32, 32);
+                const planetMaterial = new THREE.MeshStandardMaterial({
+                    color: data.color,
+                    roughness: 0.8, // Slightly rougher for non-shiny planets
+                    metalness: 0.1
+                });
+                const planetMesh = new THREE.Mesh(planetGeometry, planetMaterial);
+                
+                // Add Saturn's rings
+                if (data.hasRings) {
+                    const ringGeometry = new THREE.RingGeometry(data.radius * 1.2, data.radius * 2, 64);
+                    const ringMaterial = new THREE.MeshBasicMaterial({
+                        color: 0x7f7f7f, // Greyish color for rings
+                        side: THREE.DoubleSide // Render both sides of the ring
+                    });
+                    const ringMesh = new THREE.Mesh(ringGeometry, ringMaterial);
+                    ringMesh.rotation.x = Math.PI / 2; // Tilt rings to align with orbital plane
+                    planetMesh.add(ringMesh); // Add rings as a child of Saturn
+                }
+
+                planets.push({
+                    mesh: planetMesh,
+                    orbitalRadius: data.orbitalRadius,
+                    orbitalPeriod: data.orbitalPeriod, // Used for orbital speed
+                    rotationSpeed: data.rotationSpeed,
+                    angle: Math.random() * Math.PI * 2, // Initial random angle for orbit
+                    name: data.name, // Real planet name
+                    color: `#${data.color.toString(16).padStart(6, '0')}` // Store color as hex string
+                });
+
+                // Set initial position
+                planetMesh.position.x = Math.cos(planets[i-1].angle) * data.orbitalRadius;
+                planetMesh.position.z = Math.sin(planets[i-1].angle) * data.orbitalRadius;
+                planetMesh.position.y = 0; // Keep planets on the same plane for simplicity
+
+                scene.add(planetMesh); // Add the planet to the scene
+            }
+        }
+
+        /**
+         * Handles window resizing to keep the canvas responsive.
+         */
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight; // Update camera aspect ratio
+            camera.updateProjectionMatrix(); // Update camera's projection matrix
+            renderer.setSize(window.innerWidth, window.innerHeight); // Resize renderer
+        }
+
+        /**
+         * Updates mouseX and mouseY based on mouse movement.
+         * @param {MouseEvent} event - The mouse event object.
+         */
+        function onDocumentMouseMove(event) {
+            mouseX = (event.clientX - windowHalfX);
+            mouseY = (event.clientY - windowHalfY);
+        }
+
+        /**
+         * Updates mouseX and mouseY based on touch start.
+         * @param {TouchEvent} event - The touch event object.
+         */
+        function onDocumentTouchStart(event) {
+            if (event.touches.length === 1) {
+                event.preventDefault(); // Prevent scrolling
+                mouseX = event.touches[0].pageX - windowHalfX;
+                mouseY = event.touches[0].pageY - windowHalfY;
+            }
+        }
+
+        /**
+         * Updates mouseX and mouseY based on touch move.
+         * @param {TouchEvent} event - The touch event object.
+         */
+        function onDocumentTouchMove(event) {
+            if (event.touches.length === 1) {
+                event.preventDefault(); // Prevent scrolling
+                mouseX = event.touches[0].pageX - windowHalfX;
+                mouseY = event.touches[0].pageY - windowHalfY;
+            }
+        }
+
+        /**
+         * Handles clicks on the canvas to detect interaction with planets.
+         * @param {MouseEvent} event - The click event object.
+         */
+        function onCanvasClick(event) {
+            // Calculate mouse position in normalized device coordinates (-1 to +1) for both components
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+
+            // Update the picking ray with the camera and mouse position
+            raycaster.setFromCamera(mouse, camera);
+
+            // Get all planet meshes from the 'planets' array
+            const planetMeshes = planets.map(p => p.mesh);
+            // Also include the Sun in clickable objects
+            const clickableObjects = [sun, ...planetMeshes];
+
+            // Calculate objects intersecting the picking ray
+            const intersects = raycaster.intersectObjects(clickableObjects, true); // true for recursive check (for Saturn's rings)
+
+            // Check if any object was clicked
+            if (intersects.length > 0) {
+                const clickedObject = intersects[0].object;
+                // Find the direct parent mesh if a child (like a ring) was clicked
+                let clickedMesh = clickedObject;
+                while (clickedMesh.parent && !planets.some(p => p.mesh === clickedMesh) && clickedMesh !== sun) {
+                    clickedMesh = clickedMesh.parent;
+                }
+
+                // Check if the clicked mesh is the Sun
+                if (clickedMesh === sun) {
+                    generateSunDescription();
+                } else {
+                    // Find the corresponding planet object in our 'planets' array
+                    const clickedPlanet = planets.find(p => p.mesh === clickedMesh);
+                    if (clickedPlanet) {
+                        generatePlanetDescription(clickedPlanet.name, clickedPlanet.color); // Pass planet details
+                    }
+                }
+            }
+        }
+
+        /**
+         * Generates a description for the Sun using the Gemini API.
+         */
+        async function generateSunDescription() {
+            showMessageBox(`Generating description for the Sun... ✨`, true);
+
+            const prompt = `Generate a short, factual, and awe-inspiring description for the Sun, our star. Include its composition, temperature, importance to Earth, and a sense of its immense power. Keep it concise, around 80-120 words.`;
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // Leave as empty string; Canvas will provide
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    showMessageBox(text);
+                } else {
+                    showMessageBox("Failed to generate Sun description. Please try again.");
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                showMessageBox("An error occurred while connecting to the AI. Please check your network.");
+                console.error("Error calling Gemini API:", error);
+            }
+        }
+
+        /**
+         * Generates a description for a specific planet using the Gemini API.
+         * @param {string} planetName - The name of the clicked planet.
+         * @param {string} planetColor - The color of the clicked planet (e.g., "#0077ff").
+         */
+        async function generatePlanetDescription(planetName, planetColor) {
+            showMessageBox(`Generating a description for ${planetName}... ✨`, true); // Show loading spinner
+
+            const prompt = `Generate a short, factual, and engaging description for the planet "${planetName}" in our solar system. Include a few key facts about its size, atmosphere/surface, or unique characteristics. Keep it concise, around 60-80 words.`;
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // Leave as empty string; Canvas will provide
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    // Display description with options to generate lore and mission brief
+                    showMessageBox(text, false, [
+                        { text: `Generate Lore for ${planetName} ✨`, onClick: () => generatePlanetLore(planetName, planetColor) },
+                        { text: `Future Mission to ${planetName} ✨`, onClick: () => generateMissionBrief(planetName) },
+                        { text: 'OK', onClick: () => document.getElementById('messageBox').style.display = 'none' }
+                    ]);
+                } else {
+                    showMessageBox("Failed to generate planet description. Please try again.");
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                showMessageBox("An error occurred while connecting to the AI. Please check your network.");
+                console.error("Error calling Gemini API:", error);
+            }
+        }
+
+        /**
+         * Generates a short story/lore for a specific planet using the Gemini API.
+         * @param {string} planetName - The name of the planet.
+         * @param {string} planetColor - The color of the planet.
+         */
+        async function generatePlanetLore(planetName, planetColor) {
+            showMessageBox(`Generating lore for ${planetName}... ✨`, true); // Show loading spinner
+
+            const prompt = `Write a very short, imaginative piece of lore or a mini-story (around 80-120 words) about the real solar system planet "${planetName}", which appears ${planetColor} in color. Focus on a mythical tale, a future exploration scenario, or a unique characteristic from an artistic perspective.`;
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // Leave as empty string; Canvas will provide
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    showMessageBox(text); // Display the generated lore
+                } else {
+                    showMessageBox("Failed to generate planet lore. Please try again.");
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                showMessageBox("An error occurred while connecting to the AI. Please check your network.");
+                console.error("Error calling Gemini API:", error);
+            }
+        }
+
+        /**
+         * Generates a future exploration mission brief for a specific planet using the Gemini API.
+         * @param {string} planetName - The name of the planet for the mission.
+         */
+        async function generateMissionBrief(planetName) {
+            showMessageBox(`Generating mission brief for ${planetName}... ✨`, true); // Show loading spinner
+
+            const prompt = `Generate a short, imaginative brief (around 80-120 words) for a future human exploration mission to the planet "${planetName}" in our solar system. Include the mission's primary objective, a key challenge, and a potential groundbreaking discovery.`;
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // Leave as empty string; Canvas will provide
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    showMessageBox(text); // Display the generated mission brief
+                } else {
+                    showMessageBox("Failed to generate mission brief. Please try again.");
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                showMessageBox("An error occurred while connecting to the AI. Please check your network.");
+                console.error("Error calling Gemini API:", error);
+            }
+        }
+
+        /**
+         * Generates a description for a cosmic event using the Gemini API.
+         */
+        async function generateCosmicEventDescription() {
+            showMessageBox("Generating a cosmic event... ✨", true); // Show loading spinner
+
+            const prompt = "Generate a short, captivating description of a hypothetical cosmic event. Include its name, what it is, its impact on nearby space, and a sense of its scale or mystery. Keep it concise, around 60-80 words.";
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // Leave as empty string; Canvas will provide
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    showMessageBox(text); // Display the generated description
+                } else {
+                    showMessageBox("Failed to generate cosmic event description. Please try again.");
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                showMessageBox("An error occurred while connecting to the AI. Please check your network.");
+                console.error("Error calling Gemini API:", error);
+            }
+        }
+
+        /**
+         * Generates a space trivia question and answer using the Gemini API.
+         */
+        async function generateSpaceTrivia() {
+            showMessageBox("Generating a space trivia question... ✨", true); // Show loading spinner
+
+            const prompt = "Generate a single, interesting space trivia question with its answer. Format it as 'Question: [Your question]\\nAnswer: [Your answer]'. Keep it concise and engaging.";
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // Leave as empty string; Canvas will provide
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    showMessageBox(text); // Display the generated trivia
+                } else {
+                    showMessageBox("Failed to generate space trivia. Please try again.");
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                showMessageBox("An error occurred while connecting to the AI. Please check your network.");
+                console.error("Error calling Gemini API:", error);
+            }
+        }
+
+        /**
+         * The main animation loop.
+         * Updates camera position, star positions, and renders the scene.
+         */
+        function animate() {
+            requestAnimationFrame(animate); // Request the next animation frame
+
+            // Smoothly move the camera towards the target based on mouse/touch input
+            targetX = mouseX * 0.001; // Scale input for camera rotation
+            targetY = mouseY * 0.001;
+
+            camera.rotation.y += 0.05 * (targetX - camera.rotation.y);
+            camera.rotation.x += 0.05 * (targetY - camera.rotation.x);
+
+            // Animate Sun's rotation
+            if (sun) {
+                sun.rotation.y += 0.0005; // Slower rotation for the sun
+            }
+
+            // Animate planets
+            planets.forEach(p => {
+                p.mesh.rotation.y += p.rotationSpeed; // Self-rotation
+                p.angle += p.orbitalPeriod; // Update orbital angle based on orbital period
+                // Update orbital position around the Sun (0,0,0)
+                p.mesh.position.x = Math.cos(p.angle) * p.orbitalRadius;
+                p.mesh.position.z = Math.sin(p.angle) * p.orbitalRadius;
+            });
+
+
+            // Animate stars: move them and reset position if they go too far
+            stars.forEach(star => {
+                star.position.z += 0.05; // Move stars towards the camera
+                if (star.position.z > camera.position.z) {
+                    // If a star passes the camera, reset its position far back
+                    star.position.z = -150; // Reset further back for more depth
+                }
+            });
+
+            renderer.render(scene, camera); // Render the scene with the camera
+        }
+
+        // Ensure the animation starts only after the window has fully loaded
+        window.onload = function () {
+            init();    // Initialize the Three.js scene
+            animate(); // Start the animation loop
+            // Show a welcome message with instructions for mobile users
+            showMessageBox("Welcome to our Solar System! Drag your finger to look around. ✨ Tap on any planet (or the Sun!) for information, lore, or a future mission brief. Use the buttons for cosmic events and space trivia!");
+        };
+    </script>
+</body>
+</html>
